@@ -1,18 +1,18 @@
 name: Build VolcengineTranslation Plugin
 
-# 触发条件：main分支push/PR，或手动触发
+# 触发条件
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
 
-# 作业配置：仅在Windows环境编译（Qt 5.11.2 + VS2022兼容VS2019）
 jobs:
   build-windows:
-    runs-on: windows-2022  # GitHub Actions 预装VS2022，兼容VS2017/2019编译
-    timeout-minutes: 30  # 延长超时时间（Qt下载+编译需要足够时间）
+    runs-on: windows-2022
+    timeout-minutes: 30
+
     steps:
       # 步骤1：检出代码
       - name: Checkout code
@@ -20,25 +20,26 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 步骤2：安装 Qt 5.11.2（替换为aqtinstall，解决qt_base找不到问题）
+      # 步骤2：安装 Qt 5.15.2（推荐更高版本，和你的 msbuild arch 一致）
       - name: Install Qt 5.15.2 LTS
         uses: jurplel/install-qt-action@v3
         with:
           version: 5.15.2
           host: windows
           target: desktop
-          arch: win64_msvc2019_64  # 适配VS2022，兼容你的项目
+          arch: win64_msvc2019_64
           install-deps: true
           cache: true
-          modules: 'qtbase qttools'  # 仅安装核心模块，减小体积
+          modules: 'qtbase qttools'
 
+      # 步骤3：设置 MSBuild
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
         with:
           msbuild-architecture: x64
-          
-      # 步骤3：设置Qt环境变量（关键：让qmake/msbuild找到Qt）
-     - name: Generate VS Solution
+
+      # 步骤4：用qmake生成VS解决方案
+      - name: Generate VS Solution
         run: |
           qmake.exe ^
             VolcengineTranslation.pro ^
@@ -49,41 +50,20 @@ jobs:
         shell: cmd
         working-directory: ${{ github.workspace }}
 
-      # 步骤4：配置 VS2022 环境（初始化MSBuild）
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-        with:
-          msbuild-architecture: x64  # 64位编译
-
-      # 步骤5：用qmake生成VS解决方案
-      - name: Generate VS Solution
-        run: |
-          # 调用安装好的qmake生成.sln文件
-          ${{ github.workspace }}/Qt/5.11.2/win64_msvc2017_64/bin/qmake.exe ^
-            VolcengineTranslation.pro ^
-            -spec win32-msvc ^
-            CONFIG+=release ^
-            CONFIG+=x64 ^
-            -o VolcengineTranslation.sln
-        shell: cmd
-        working-directory: ${{ github.workspace }}  # 代码根目录
-
-      # 步骤6：执行MSBuild编译（核心修复）
+      # 步骤5：用MSBuild编译
       - name: Build with MSBuild
         run: |
           msbuild.exe ^
             VolcengineTranslation.sln ^
             /p:Configuration=Release ^
             /p:Platform=x64 ^
-            /p:Qt5_DIR=${{ github.workspace }}/Qt/5.11.2/win64_msvc2017_64/lib/cmake/Qt5 ^
             /m ^
-            /verbosity:minimal  # 简化输出，仅显示关键信息
+            /verbosity:minimal
         working-directory: ${{ github.workspace }}
 
-      # 步骤7：打包编译产物（上传为Artifact）
+      # 步骤6：打包编译产物（上传为Artifact）
       - name: Package Build Artifacts
         run: |
-          # 检查输出目录是否存在
           if (Test-Path "./bin/win64/Release") {
               Compress-Archive -Path ./bin/win64/Release/* -DestinationPath VolcengineTranslation_Release.zip -Force
           } else {
@@ -93,10 +73,10 @@ jobs:
         shell: powershell
         working-directory: ${{ github.workspace }}
 
-      # 步骤8：上传产物到GitHub Actions Artifact
+      # 步骤7：上传产物到GitHub Actions Artifact
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: VolcengineTranslation-x64-Release
           path: ${{ github.workspace }}/VolcengineTranslation_Release.zip
-          retention-days: 30  # 产物保留30天
+          retention-days: 30
