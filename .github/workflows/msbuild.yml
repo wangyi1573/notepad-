@@ -21,18 +21,13 @@ jobs:
           fetch-depth: 1
 
       # 步骤2：安装 Qt 5.11.2（替换为aqtinstall，解决qt_base找不到问题）
-      - name: Install Qt 5.11.2
+      - name: Download Qt 5.11.2 Prebuilt Package
         run: |
-          # 安装aqtinstall（Qt离线安装工具，兼容旧版本）
-          pip install aqtinstall==3.1.21
-          # 安装Qt 5.11.2 win64_msvc2017_64核心模块
-          python -m aqt install-qt ^
-            windows desktop 5.11.2 ^
-            win64_msvc2017_64 ^
-            --outputdir ${{ github.workspace }}/Qt ^
-            --modules qtbase qttools ^
-            --confirm-license  # 自动确认许可证
-        shell: cmd
+          # 下载清华镜像的 Qt 5.11.2 win64_msvc2017_64 包（约400MB）
+          Invoke-WebRequest -Uri "https://mirrors.tuna.tsinghua.edu.cn/qt/archive/qt/5.11/5.11.2/qt-opensource-windows-x86-5.11.2.exe" -OutFile "qt_installer.exe"
+          # 静默安装 Qt 到指定目录（跳过GUI，直接解压核心文件）
+          .\qt_installer.exe --verbose --no-force-installations --directory ${{ github.workspace }}/Qt --accept-licenses --accept-obligations
+        shell: powershell
 
       # 步骤3：设置Qt环境变量（关键：让qmake/msbuild找到Qt）
       - name: Set Qt Environment
