@@ -30,7 +30,7 @@ jobs:
           arch: win64_msvc2019_64
           install-deps: true
           cache: true
-          modules: 'qtbase qttools'
+          # modules: 'qtbase qttools'
 
       # 步骤3：设置 MSBuild
       - name: Setup MSBuild
