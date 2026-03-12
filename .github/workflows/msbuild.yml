@@ -8,11 +8,11 @@ on:
     branches: [ main ]
   workflow_dispatch:  # 手动触发
 
-# 作业配置：仅在Windows环境编译（Qt 5.11.2 + VS2019）
+# 作业配置：仅在Windows环境编译（Qt 5.11.2 + VS2022兼容VS2019）
 jobs:
   build-windows:
-    runs-on: windows-2022  # GitHub Actions 自带VS2025的Windows镜像
-  timeout-minutes: 10  # 超时时间设为10分钟，避免无限等待  
+    runs-on: windows-2022  # GitHub Actions 预装VS2022，兼容VS2017/2019编译
+    timeout-minutes: 30  # 延长超时时间（Qt下载+编译需要足够时间）
     steps:
       # 步骤1：检出代码
       - name: Checkout code
@@ -20,48 +20,59 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 步骤2：安装 Qt 5.11.2（关键：适配你的项目版本）
+      # 步骤2：安装 Qt 5.11.2（替换为aqtinstall，解决qt_base找不到问题）
       - name: Install Qt 5.11.2
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: 5.11.2
-          host: windows
-          target: desktop
-          arch: win64_msvc2017_64  # Qt 5.11.2 对应VS2017（VS2019兼容）
-          install-deps: true  # 自动安装依赖
-          cache: true  # 缓存Qt，加速后续构建
+        run: |
+          # 安装aqtinstall（Qt离线安装工具，兼容旧版本）
+          pip install aqtinstall==3.1.21
+          # 安装Qt 5.11.2 win64_msvc2017_64核心模块
+          python -m aqt install-qt ^
+            windows desktop 5.11.2 ^
+            win64_msvc2017_64 ^
+            --outputdir ${{ github.workspace }}/Qt ^
+            --modules qtbase qttools ^
+            --confirm-license  # 自动确认许可证
+        shell: cmd
 
-      # 步骤3：配置 VS2019 环境（初始化MSBuild）
+      # 步骤3：设置Qt环境变量（关键：让qmake/msbuild找到Qt）
+      - name: Set Qt Environment
+        run: |
+          setx QTDIR "${{ github.workspace }}/Qt/5.11.2/win64_msvc2017_64"
+          setx PATH "%PATH%;${{ github.workspace }}/Qt/5.11.2/win64_msvc2017_64/bin"
+        shell: cmd
+
+      # 步骤4：配置 VS2022 环境（初始化MSBuild）
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
         with:
           msbuild-architecture: x64  # 64位编译
 
-      # 步骤4：用qmake生成VS解决方案
+      # 步骤5：用qmake生成VS解决方案
       - name: Generate VS Solution
         run: |
-          # 调用Qt的qmake生成.sln文件
-          qmake.exe ^
+          # 调用安装好的qmake生成.sln文件
+          ${{ github.workspace }}/Qt/5.11.2/win64_msvc2017_64/bin/qmake.exe ^
             VolcengineTranslation.pro ^
             -spec win32-msvc ^
             CONFIG+=release ^
             CONFIG+=x64 ^
             -o VolcengineTranslation.sln
+        shell: cmd
         working-directory: ${{ github.workspace }}  # 代码根目录
 
-      # 步骤5：执行MSBuild编译（核心修复）
+      # 步骤6：执行MSBuild编译（核心修复）
       - name: Build with MSBuild
         run: |
           msbuild.exe ^
             VolcengineTranslation.sln ^
             /p:Configuration=Release ^
             /p:Platform=x64 ^
-            /p:Qt5_DIR=${{ env.Qt5_DIR }}/lib/cmake/Qt5 ^
+            /p:Qt5_DIR=${{ github.workspace }}/Qt/5.11.2/win64_msvc2017_64/lib/cmake/Qt5 ^
             /m ^
             /verbosity:minimal  # 简化输出，仅显示关键信息
         working-directory: ${{ github.workspace }}
 
-      # 步骤6：打包编译产物（上传为Artifact）
+      # 步骤7：打包编译产物（上传为Artifact）
       - name: Package Build Artifacts
         run: |
           # 检查输出目录是否存在
@@ -74,7 +85,7 @@ jobs:
         shell: powershell
         working-directory: ${{ github.workspace }}
 
-      # 步骤7：上传产物到GitHub Actions Artifact
+      # 步骤8：上传产物到GitHub Actions Artifact
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
