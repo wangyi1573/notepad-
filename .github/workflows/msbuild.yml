@@ -21,20 +21,33 @@ jobs:
           fetch-depth: 1
 
       # 步骤2：安装 Qt 5.11.2（替换为aqtinstall，解决qt_base找不到问题）
-      - name: Download Qt 5.11.2 Prebuilt Package
-        run: |
-          # 下载清华镜像的 Qt 5.11.2 win64_msvc2017_64 包（约400MB）
-          Invoke-WebRequest -Uri "https://mirrors.tuna.tsinghua.edu.cn/qt/archive/qt/5.11/5.11.2/qt-opensource-windows-x86-5.11.2.exe" -OutFile "qt_installer.exe"
-          # 静默安装 Qt 到指定目录（跳过GUI，直接解压核心文件）
-          .\qt_installer.exe --verbose --no-force-installations --directory ${{ github.workspace }}/Qt --accept-licenses --accept-obligations
-        shell: powershell
+      - name: Install Qt 5.15.2 LTS
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: 5.15.2
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64  # 适配VS2022，兼容你的项目
+          install-deps: true
+          cache: true
+          modules: 'qtbase qttools'  # 仅安装核心模块，减小体积
 
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
+          
       # 步骤3：设置Qt环境变量（关键：让qmake/msbuild找到Qt）
-      - name: Set Qt Environment
+     - name: Generate VS Solution
         run: |
-          setx QTDIR "${{ github.workspace }}/Qt/5.11.2/win64_msvc2017_64"
-          setx PATH "%PATH%;${{ github.workspace }}/Qt/5.11.2/win64_msvc2017_64/bin"
+          qmake.exe ^
+            VolcengineTranslation.pro ^
+            -spec win32-msvc ^
+            CONFIG+=release ^
+            CONFIG+=x64 ^
+            -o VolcengineTranslation.sln
         shell: cmd
+        working-directory: ${{ github.workspace }}
 
       # 步骤4：配置 VS2022 环境（初始化MSBuild）
       - name: Setup MSBuild
