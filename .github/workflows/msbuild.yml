@@ -11,22 +11,16 @@ jobs:
   build-windows:
     runs-on: windows-2022
     timeout-minutes: 30
-    # 开启调试日志，便于排查环境问题
-    env:
-      QT_DEBUG: 1
-      MSBUILD_DEBUG: 1
 
     steps:
-      # 步骤1：检出代码
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # 步骤2：安装 Qt 5.15.2（带完整验证）
-      - name: Install Qt 5.15.2 LTS
+      - name: Install Qt 5.15.2
         uses: jurplel/install-qt-action@v3
-        id: install-qt  # 标记步骤，便于后续获取Qt路径
+        id: install-qt
         with:
           version: 5.15.2
           host: windows
@@ -35,109 +29,83 @@ jobs:
           install-deps: true
           cache: true
 
-      # 步骤3：强制配置 Qt 环境变量（核心修复环境错误）
-      - name: Force Set Qt Environment
-        run: |
-          # 从install-qt步骤获取Qt安装路径，避免环境变量丢失
-          echo "Qt安装路径：${{ steps.install-qt.outputs.qt-install-dir }}"
-          # 全局设置QTDIR和PATH，确保所有步骤能找到Qt
-          setx QTDIR "${{ steps.install-qt.outputs.qt-install-dir }}" /M
-          setx PATH "%PATH%;${{ steps.install-qt.outputs.qt-install-dir }}/bin" /M
-          # 立即生效环境变量（Windows需要刷新）
-          $env:QTDIR = "${{ steps.install-qt.outputs.qt-install-dir }}"
-          $env:PATH += ";${{ steps.install-qt.outputs.qt-install-dir }}/bin"
-          # 验证Qt是否可用
-          qmake --version
-          if ($LASTEXITCODE -ne 0) {
-              Write-Error "Qt环境配置失败！Qt路径：${{ steps.install-qt.outputs.qt-install-dir }}"
-              dir "${{ steps.install-qt.outputs.qt-install-dir }}/bin"  # 列出Qt二进制文件
-              exit 1
-          }
-        shell: powershell
-
-      # 步骤4：设置 MSBuild（带版本验证）
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
-        id: setup-msbuild
         with:
           msbuild-architecture: x64
-      - name: Verify MSBuild
+
+      - name: Configure Qt Environment
         run: |
-          msbuild -version
+          $qtDir = "${{ steps.install-qt.outputs.qt-install-dir }}"
+          Write-Host "Qt installed at: $qtDir"
+          
+          $env:QTDIR = $qtDir
+          $env:PATH += ";$qtDir\bin"
+          
+          qmake --version
           if ($LASTEXITCODE -ne 0) {
-              Write-Error "MSBuild配置失败！"
-              exit 1
+            Write-Error "Qt qmake not found!"
+            exit 1
           }
         shell: powershell
 
-      # 步骤5：生成VS解决方案（带错误兜底）
       - name: Generate VS Solution
         run: |
-          # 显式指定qmake路径，避免环境变量问题
-          $qmakePath = "${{ steps.install-qt.outputs.qt-install-dir }}/bin/qmake.exe"
-          & $qmakePath ^
-            VolcengineTranslation.pro ^
-            -spec win32-msvc ^
-            CONFIG+=release ^
-            CONFIG+=x64 ^
-            -o VolcengineTranslation.sln
-          # 验证解决方案是否生成
+          $qtDir = "${{ steps.install-qt.outputs.qt-install-dir }}"
+          $qmakePath = "$qtDir\bin\qmake.exe"
+          
+          Write-Host "Using qmake: $qmakePath"
+          
+          & $qmakePath VolcengineTranslation.pro -spec win32-msvc CONFIG+=release CONFIG+=x64
+          
           if (-not (Test-Path "VolcengineTranslation.sln")) {
-              Write-Error "VS解决方案生成失败！"
-              dir ${{ github.workspace }}  # 列出当前目录文件
-              exit 1
-          }
-        shell: cmd
-        working-directory: ${{ github.workspace }}
-
-      # 步骤6：编译（显式指定Qt5_DIR，解决环境错误）
-      - name: Build with MSBuild
-        run: |
-          msbuild.exe ^
-            VolcengineTranslation.sln ^
-            /p:Configuration=Release ^
-            /p:Platform=x64 ^
-            /p:Qt5_DIR="${{ steps.install-qt.outputs.qt-install-dir }}/lib/cmake/Qt5" ^
-            /p:QTDIR="${{ steps.install-qt.outputs.qt-install-dir }}" ^
-            /m ^
-            /verbosity:normal  # 改为normal，便于排查编译错误
-          # 验证编译是否成功
-          if ($LASTEXITCODE -ne 0) {
-              Write-Error "MSBuild编译失败！"
-              exit 1
-          }
-        working-directory: ${{ github.workspace }}
-
-      # 步骤7：打包（增加路径容错）
-      - name: Package Build Artifacts
-        run: |
-          # 兼容多种输出路径（Qt不同版本可能略有差异）
-          $outputPaths = @(
-              "./bin/win64/Release",
-              "./Release",
-              "${{ github.workspace }}/bin/win64/Release"
-          )
-          $found = $false
-          foreach ($path in $outputPaths) {
-              if (Test-Path $path) {
-                  Compress-Archive -Path "$path/*" -DestinationPath VolcengineTranslation_Release.zip -Force
-                  Write-Host "打包成功！输出路径：$path"
-                  $found = $true
-                  break
-              }
-          }
-          if (-not $found) {
-              Write-Error "编译输出目录不存在！所有检查的路径：$($outputPaths -join ', ')"
-              dir ${{ github.workspace }} -Recurse | Where-Object { $_.Extension -eq '.dll' -or $_.Extension -eq '.exe' }  # 列出所有编译产物
-              exit 1
+            Write-Error "Failed to generate VS solution!"
+            Get-ChildItem -Path .
+            exit 1
           }
         shell: powershell
-        working-directory: ${{ github.workspace }}
 
-      # 步骤8：上传产物
+      - name: Build with MSBuild
+        run: |
+          $qtDir = "${{ steps.install-qt.outputs.qt-install-dir }}"
+          
+          msbuild VolcengineTranslation.sln `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /m `
+            /verbosity:minimal
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "MSBuild failed!"
+            exit 1
+          }
+        shell: powershell
+
+      - name: Find Build Output
+        run: |
+          Write-Host "Searching for build output..."
+          Get-ChildItem -Path . -Recurse -Filter "*.dll" | ForEach-Object {
+            Write-Host "Found DLL: $($_.FullName)"
+          }
+        shell: powershell
+
+      - name: Package Build Artifacts
+        run: |
+          $outputDir = ".\bin\win64\Release"
+          
+          if (Test-Path $outputDir) {
+            Write-Host "Packaging from: $outputDir"
+            Compress-Archive -Path "$outputDir\*" -DestinationPath VolcengineTranslation_Release.zip -Force
+          } else {
+            Write-Error "Output directory not found: $outputDir"
+            Get-ChildItem -Path . -Recurse -Directory | Select-Object FullName
+            exit 1
+          }
+        shell: powershell
+
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: VolcengineTranslation-x64-Release
-          path: ${{ github.workspace }}/VolcengineTranslation_Release.zip
+          path: VolcengineTranslation_Release.zip
           retention-days: 30
