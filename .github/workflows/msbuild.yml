@@ -29,6 +29,16 @@ jobs:
           install-deps: true
           cache: true
 
+      - name: Debug Qt Installation
+        run: |
+          Write-Host "Install Qt step outputs:"
+          Write-Host "qt-path: ${{ steps.install-qt.outputs.qt-path }}"
+          Write-Host "qt-dir: ${{ steps.install-qt.outputs.qt-dir }}"
+          Write-Host "qt-install-dir: ${{ steps.install-qt.outputs.qt-install-dir }}"
+          Write-Host "All outputs:"
+          "${{ steps.install-qt.outputs.* }}" | ForEach-Object { Write-Host $_ }
+        shell: powershell
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
         with:
@@ -36,11 +46,19 @@ jobs:
 
       - name: Configure Qt Environment
         run: |
-          $qtDir = "${{ steps.install-qt.outputs.qt-install-dir }}"
+          $qtDir = "${{ steps.install-qt.outputs.qt-path }}"
           Write-Host "Qt installed at: $qtDir"
+          Write-Host "Qt dir length: $($qtDir.Length)"
+          
+          if ([string]::IsNullOrEmpty($qtDir)) {
+            Write-Error "Qt install directory is empty!"
+            exit 1
+          }
           
           $env:QTDIR = $qtDir
           $env:PATH += ";$qtDir\bin"
+          
+          Write-Host "PATH: $env:PATH"
           
           qmake --version
           if ($LASTEXITCODE -ne 0) {
@@ -51,10 +69,25 @@ jobs:
 
       - name: Generate VS Solution
         run: |
-          $qtDir = "${{ steps.install-qt.outputs.qt-install-dir }}"
+          $qtDir = "${{ steps.install-qt.outputs.qt-path }}"
+          
+          Write-Host "Qt directory: $qtDir"
+          
+          if ([string]::IsNullOrEmpty($qtDir)) {
+            Write-Error "Qt directory is empty!"
+            exit 1
+          }
+          
           $qmakePath = "$qtDir\bin\qmake.exe"
           
           Write-Host "Using qmake: $qmakePath"
+          
+          if (-not (Test-Path $qmakePath)) {
+            Write-Error "qmake.exe not found at: $qmakePath"
+            Write-Host "Qt directory contents:"
+            Get-ChildItem -Path "$qtDir\bin" -ErrorAction SilentlyContinue | Select-Object Name
+            exit 1
+          }
           
           & $qmakePath VolcengineTranslation.pro -spec win32-msvc CONFIG+=release CONFIG+=x64
           
@@ -67,7 +100,7 @@ jobs:
 
       - name: Build with MSBuild
         run: |
-          $qtDir = "${{ steps.install-qt.outputs.qt-install-dir }}"
+          $qtDir = "${{ steps.install-qt.outputs.qt-path }}"
           
           msbuild VolcengineTranslation.sln `
             /p:Configuration=Release `
